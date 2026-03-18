@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
     println!("🚀 Starting tracker...");
 
     let alchemy_wss = env::var("ALCHEMY_WSS")
-        .expect("❌ ERROR : ALCHEMY_WSS not found");
+        .expect("❌ ERROR: ALCHEMY_WSS not found");
 
     // Establish a persistent WebSocket connection to the Ethereum Mainnet
     let ws = WsConnect::new(alchemy_wss);
@@ -29,11 +29,10 @@ async fn main() -> Result<()> {
     // Subscribe to the live stream using our filter
     let mut stream = provider.subscribe_logs(&filter).await?.into_stream();
 
-    println!("✅ Connected ! Waiting for approvals...\n");
+    println!("✅ Connected! Waiting for contract approvals...\n");
 
     // The Event Loop: This will run infinitely, processing new blocks and logs as they arrive
-    while let Some(log) = stream.next().await {
-        
+    while let Some(log) = stream.next().await {        
         // Check if the log is attached to a specific transaction hash
         if let Some(tx_hash) = log.transaction_hash {
             
@@ -49,14 +48,28 @@ async fn main() -> Result<()> {
                     
                     // Decode the raw EVM log into readable Rust variables
                     if let Ok(decoded_log) = log.log_decode::<Approval>() {
-                        // Extract the `owner`, `spender`, and `value` from the decoded structure
                         let approval = decoded_log.inner;
                         
-                        println!("🚨 APPROVAL DETECTED 🚨");
+                        // Fetch the bytecode at the spender's address
+                        if let Ok(code) = provider.get_code_at(approval.spender).await {
+                            if code.is_empty() {
+                                // Bytecode is empty -> This is an EOA.
+                                // We skip this log and continue the loop.
+                                continue; 
+                            }
+                        } else {
+                            // If the RPC call fails for some reason, ignore and move on
+                            continue;
+                        }
+
+                        let block_number = log.block_number.unwrap_or_default();
+
+                        println!("🚨 CONTRACT APPROVAL DETECTED 🚨");
                         println!("Tx Hash         : {}", tx_hash);
-                        println!("Contract (Token): {}", log.address());
+                        println!("Block Number    : {}", block_number);
+                        println!("Token Contract  : {}", log.address());
                         println!("Owner           : {}", approval.owner);
-                        println!("Spender         : {}", approval.spender);
+                        println!("Spender Contract: {}", approval.spender);
                         println!("Approved Amount : {}\n", approval.value);
                     }
                 }
